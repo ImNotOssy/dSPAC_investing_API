@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="dspac_investing_API",
+    name="dspac_invest_api",
     version="0.1.0",
     description="Unofficial dSPAC Invest API written in Python Requests",
     url="https://github.com/ImNotOssy/dSPAC_investing_API",
