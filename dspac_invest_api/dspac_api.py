@@ -21,8 +21,8 @@ class DSPACAPI:
         self.password = r"" + password
         self.filename = filename
         self.creds_path = creds_path
-        self.cookies = self._load_cookies()
         self.debug = debug
+        self.cookies = self._load_cookies()
         self._debug_print(f"DSPACAPI Initialized for {self.user}")
 
     def _debug_print(self, text):
