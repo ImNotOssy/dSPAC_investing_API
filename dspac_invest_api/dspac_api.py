@@ -238,7 +238,22 @@ class DSPACAPI:
         self._debug_print(f"Account info response: {response.json()}")
         return response.json()
 
-    def validate_buy(self, symbol, amount, order_side, account_number):
+    def get_simple_stock_info(self, symbol):
+        hex_time = current_epoch_time_as_hex()
+        url = f'https://api.dspac.com/api/v2/market/getSimpleStockInfo?symbols={symbol}&_v=6.6.0&_s={hex_time}'
+        headers = {
+            'User-Agent': 'DSPAC Dalvik/2.1.0 (Linux; U; Android 12; SM-S928U1 Build/SE1A.211212.001.B1)',
+            'Tz': '-360',
+            'Tzname': 'America/Chicago',
+            'Accept-Language': 'en',
+            'Accept-Encoding': 'gzip, deflate, br'
+        }
+        self._debug_print(f"Fetching stock info for {symbol}")
+        response = requests.get(url, headers=headers, cookies=self.cookies)
+        self._debug_print(f"Stock info response: {response.json()}")
+        return response.json()
+
+    def validate_buy(self, symbol, amount, order_side, account_number, order_type="MARKET", entrust_price=None):
         hex_time = current_epoch_time_as_hex()
         url = f'https://api.dspac.com/api/v2/us/trade/validateBuy?_v=6.6.0&_s={hex_time}'
         headers = {
@@ -259,30 +274,40 @@ class DSPACAPI:
             "orderTimeInForce": "DAY",
             "symbol": symbol,
             "tradeNativeType": 0,
-            "type": "MARKET",
+            "type": order_type,
             "usAccountId": account_number
         }
-        self._debug_print(f"Validating buy for {amount} shares of {symbol}")
+        # Add entrustPrice to the request if it's a LIMIT order and price is provided
+        if order_type == "LIMIT" and entrust_price is not None:
+            data["entrustPrice"] = entrust_price
+
+        self._debug_print(f"Validating {order_type} buy for {amount} shares of {symbol}")
         response = requests.post(url, headers=headers, json=data, cookies=self.cookies)
         self._debug_print(f"Validation response: {response.json()}")
         return response.json()
 
-    def execute_buy(self, symbol, amount, account_number, dry_run=True):
+    def execute_buy(self, symbol, amount, account_number, dry_run=True, validation_response=None):
         # Determine the order side (1 for buy, 0 for sell)
         order_side = 1
 
-        # Validate the buy order
-        validation_response = self.validate_buy(symbol, amount, order_side, account_number)
-
+        # If no validation response is passed, this function is being called incorrectly by the new logic
+        if validation_response is None:
+            self._debug_print("execute_buy ERROR: validation_response is missing.")
+            return {"Outcome": "Failed", "Message": "execute_buy called without validation_response."}
+        
         if validation_response['Outcome'] != 'Success':
             print("Buy validation failed.")
             return validation_response
+        
+        # Get all data from the successful validation
+        validation_data = validation_response['Data']
+        order_type = validation_data['type']
+        entrust_price = validation_data['entrustPrice']
 
         if dry_run:
-            # For a dry run, just print the simulated order details
-            total_cost = validation_response['Data']['totalWithCommission']
-            entrust_amount = validation_response['Data']['entrustAmount']
-            self._debug_print(f"Simulated buy: {entrust_amount} shares of {symbol} for a total of ${total_cost}")
+            total_cost = validation_data['totalWithCommission']
+            entrust_amount = validation_data['entrustAmount']
+            self._debug_print(f"Simulated {order_type} buy: {entrust_amount} shares of {symbol} for a total of ${total_cost}")
             return validation_response
 
         # Proceed to actual buy if not a dry run
@@ -294,24 +319,24 @@ class DSPACAPI:
             'Content-Type': 'application/json; charset=UTF-8',
         }
         data = {
-            "allowExtHrsFill": validation_response['Data']['allowExtHrsFill'],
-            "displayAmount": validation_response['Data']['displayAmount'],
-            "entrustAmount": validation_response['Data']['entrustAmount'],
-            "entrustPrice": validation_response['Data']['entrustPrice'],
-            "fractions": validation_response['Data']['fractions'],
-            "fractionsType": validation_response['Data']['fractionsType'],
+            "allowExtHrsFill": validation_data['allowExtHrsFill'],
+            "displayAmount": validation_data['displayAmount'],
+            "entrustAmount": validation_data['entrustAmount'],
+            "entrustPrice": entrust_price,
+            "fractions": validation_data['fractions'],
+            "fractionsType": validation_data['fractionsType'],
             "idempotentId": str(uuid.uuid4()),  # Generates a unique ID for idempotency
             "isCombinedOption": False,
             "isOption": False,
             "orderSide": order_side,
             "orderSource": 0,
-            "orderTimeInForce": validation_response['Data']['orderTimeInForce'],
+            "orderTimeInForce": validation_data['orderTimeInForce'],
             "symbol": symbol,
             "tradeNativeType": 0,
-            "type": validation_response['Data']['type'],
+            "type": order_type,
             "usAccountId": account_number
         }
-        self._debug_print(f"Executing buy for {amount} shares of {symbol} at ${data['entrustPrice']}")
+        self._debug_print(f"Executing {order_type} buy for {amount} shares of {symbol} at ${data['entrustPrice']}")
         response = requests.post(url, headers=headers, json=data, cookies=self.cookies)
         self._debug_print(f"Buy response: {response.json()}")
         return response.json()
